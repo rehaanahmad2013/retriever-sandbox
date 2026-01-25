@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "papers_universal_id_idx" ON "papers" USING btree ("universal_id");
