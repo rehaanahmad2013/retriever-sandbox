@@ -294,3 +294,90 @@ export const insertPaperAbstractEmbedding = async (paperId: PaperId, embedding: 
     })
     .onConflictDoNothing();
 };
+
+/**
+ * Search for papers by embedding similarity
+ * @param queryEmbedding The embedding vector to search for similar papers
+ * @param options Search options including limit and minimum publication date
+ * @returns Array of papers sorted by similarity to the query, with their similarity scores
+ */
+export const searchPapersByEmbedding = async (
+  queryEmbedding: number[],
+  options: {
+    limit?: number;
+    minPublicationDate?: Date;
+  } = {}
+) => {
+  const { limit = 100, minPublicationDate } = options;
+
+  // Validate embedding dimensions
+  if (queryEmbedding.length !== 3072) {
+    throw new Error(`Invalid embedding dimensions: expected 3072, got ${queryEmbedding.length}`);
+  }
+
+  // Use transaction with SET LOCAL to ensure ef_search only affects this query
+  const result = await db.transaction(async (tx) => {
+    // Increase ef_search to explore more of the HNSW graph (default is ~40)
+    // Higher values give better recall at the cost of query speed
+    await tx.execute(sql`SET LOCAL hnsw.ef_search = 1000`);
+
+    // Query the HNSW index for similar embeddings
+    // Using halfvec for the index as it fits in 8kb pages for better performance
+    const similarPapers = await tx
+      .select({
+        paperId: paperAbstractEmbeddings.paperId,
+        distance: sql<number>`abstract_embedding_half <=> ${sql.raw(`'[${queryEmbedding.join(",")}]'::halfvec`)}`,
+      })
+      .from(paperAbstractEmbeddings)
+      .orderBy(sql`abstract_embedding_half <=> ${sql.raw(`'[${queryEmbedding.join(",")}]'::halfvec`)}`)
+      .limit(limit);
+
+    const paperIds = similarPapers.map((p) => p.paperId);
+
+    // Build where conditions
+    const whereConditions = [inArray(papers.id, paperIds)];
+    
+    if (minPublicationDate !== undefined) {
+      whereConditions.push(gte(papers.publicationDate, minPublicationDate));
+    }
+
+    // Join with papers table to get full paper details
+    const filteredResults = await tx
+      .select({
+        id: papers.id,
+        title: papers.title,
+        abstract: papers.abstract,
+        universalId: papers.universalId,
+        publicationDate: papers.publicationDate,
+        votes: papers.votes,
+      })
+      .from(papers)
+      .where(and(...whereConditions));
+
+    // Create a map to preserve similarity order and add distance scores
+    const paperIdToDistance = new Map(
+      similarPapers.map((p) => [p.paperId, p.distance])
+    );
+
+    const paperIdToDetails = new Map(
+      filteredResults.map((p) => [p.id, p])
+    );
+
+    // Maintain original similarity order and combine with paper details
+    return paperIds
+      .map((paperId) => {
+        const details = paperIdToDetails.get(paperId);
+        if (!details) return null;
+        
+        return {
+          ...details,
+          similarityDistance: paperIdToDistance.get(paperId) ?? 1.0,
+        };
+      })
+      .filter((paper): paper is NonNullable<typeof paper> => paper !== null)
+      .slice(0, limit); // Trim to requested limit after filtering
+  });
+
+  return result;
+};
+
