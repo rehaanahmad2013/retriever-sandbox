@@ -1,6 +1,6 @@
-import { pgTable, text, integer, index, uniqueIndex, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, index, uniqueIndex, timestamp, halfvec, vector } from "drizzle-orm/pg-core";
 import { id } from "../../lib/db-types";
-import type { PaperId, PaperPageId } from "../../lib/id";
+import type { PaperAbstractEmbeddingId, PaperId, PaperPageId } from "../../lib/id";
 import { sql } from "drizzle-orm";
 
 export const papers = pgTable("papers", {
@@ -23,3 +23,16 @@ export const paperPages = pgTable("paper_pages", {
   textGinIndex: index("paper_pages_text_gin_idx").using("gin", sql`to_tsvector('english', ${table.text})`),
   paperPageUnique: uniqueIndex("paper_pages_paper_id_page_number_idx").on(table.paperId, table.pageNumber)
 }));
+
+export const paperAbstractEmbeddings = pgTable("paper_abstract_embeddings", {
+  id: id<PaperAbstractEmbeddingId>().primaryKey(),
+  paperId: id<PaperId>().notNull().references(() => papers.id, { onDelete: "cascade" }),
+  abstractEmbedding: vector({ dimensions: 3072 }).notNull(), // Raw embedding in case we want to do a better transform in the future (PCA, better rounding, etc)
+  abstractEmbeddingHalf: halfvec({ dimensions: 3072 }).notNull(), // Half-sized quant of the raw embedding for indexing, raw embedding doesn't fit into an 8kb page
+}, (table) => [
+  index("idx_paper_version_embeddings_embedding").using(
+    "hnsw",
+    table.abstractEmbeddingHalf.op("halfvec_cosine_ops")
+  ),
+  uniqueIndex("uidx_paper_abstract_embeddings_paper_id").on(table.paperId),
+]);
