@@ -369,8 +369,10 @@ export const searchPapersByEmbedding = async (
         const details = paperIdToDetails.get(paperId);
         if (!details) return null;
         
+        const { id, ...detailsWithoutId } = details;
+        
         return {
-          ...details,
+          ...detailsWithoutId,
           similarityDistance: paperIdToDistance.get(paperId) ?? 1.0,
         };
       })
