@@ -26,7 +26,7 @@ async function coalesceOutputs() {
   // Get the repo root (go up from db/scripts/)
   const currentFileDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = join(currentFileDir, "..", "..");
-  const outputsDir = join(repoRoot, "outputs_test");
+  const outputsDir = join(repoRoot, "outputs_train_round_2");
   const processedOutputsDir = join(repoRoot, "processed_outputs");
 
   // Create processed_outputs directory if it doesn't exist
@@ -44,11 +44,19 @@ async function coalesceOutputs() {
   console.log(`Found ${jsonFiles.length} JSON files\n`);
 
   const results: CoalescedResult[] = [];
+  const seenQueries = new Set<string>();
 
   for (const file of jsonFiles) {
     const filePath = join(outputsDir, file);
     const content = await readFile(filePath, "utf-8");
     const data = JSON.parse(content) as OutputFile;
+
+    // Skip duplicate queries
+    if (seenQueries.has(data.query)) {
+      console.log(`Skipping duplicate query: "${data.query.slice(0, 80)}..."`);
+      continue;
+    }
+    seenQueries.add(data.query);
 
     // Extract query and papers (universal IDs)
     const papers = data.response.papers.map((paper) => paper.universalId);

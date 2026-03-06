@@ -7,7 +7,7 @@ import { getPapersByUniversalIds } from "../services/papers";
 
 // Load queries from text file (one query per line)
 const currentFileDir = dirname(fileURLToPath(import.meta.url));
-const queriesFile = Bun.file(join(currentFileDir, "new-data", "train_round_2.txt"));
+const queriesFile = Bun.file(join(currentFileDir, "new-data", "train.txt"));
 const queriesText = await queriesFile.text();
 const queries: string[] = queriesText.split("\n").map((l: string) => l.trim()).filter(Boolean);
 
